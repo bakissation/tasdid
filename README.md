@@ -71,8 +71,9 @@ Terminal states are immutable (no double-charge, no double-refund); illegal tran
 | `handleReturn({ orderId \| paymentId })` | Match the return → reconcile |
 | `reconcile(paymentId)` | Poll `getOrderStatus`, converge state, fire events |
 | `refund(paymentId, amount?)` | Full/partial refund (≤ deposited) |
+| `get(paymentId)` | Read current state — no gateway call (`PaymentResult \| null`) |
 | `reconcilePending(checkout, store)` | Sweep all pending payments (cron/queue) |
-| `createMemoryStore()` / `createPostgresStore(db)` / `createRedisStore(client)` | Bundled `PaymentStore` implementations |
+| `createMemoryStore()` / `createPostgresStore(db)` / `createRedisStore(client)` / `createPrismaStore(delegate)` | Bundled `PaymentStore` implementations |
 | `PaymentStore` | Interface to implement your own |
 
 Amounts are `Dinar` in and out. Every method returns a `PaymentResult`.

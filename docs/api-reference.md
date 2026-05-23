@@ -24,6 +24,7 @@ import {
 | `handleReturn(params: ReturnParams)` | `Promise<PaymentResult>` | match by `orderId`/`paymentId` → reconcile |
 | `reconcile(paymentId)` | `Promise<PaymentResult>` | poll `getOrderStatus`, converge, fire events; no-op once terminal |
 | `refund(paymentId, amount?, opts?: { idempotencyKey? })` | `Promise<PaymentResult>` | full/partial (≤ deposited); reusing an `idempotencyKey` is a no-op |
+| `get(paymentId)` | `Promise<PaymentResult \| null>` | read current state, no gateway call (no side effects) |
 
 ## Types
 - **`StartOrder`** — `orderNumber`, `amount: Dinar`, `returnUrl`, `failUrl?`, `description?`, `language?`, `udf1?`, `idempotencyKey?`, `expiresInMinutes?`, `metadata?`.
