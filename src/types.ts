@@ -22,6 +22,15 @@ export interface TransitionRecord {
   satimStatus?: number | null;
 }
 
+/**
+ * A transition delivered to the `onTransition` hook: the audit record plus the
+ * identity needed to act on it. This is the seam a durable outbox plugs into.
+ */
+export interface TransitionEvent extends TransitionRecord {
+  paymentId: string;
+  orderNumber: string;
+}
+
 /** One applied refund — recorded for idempotency and audit. */
 export interface RefundRecord {
   /** The caller's idempotency key for this refund, if one was supplied. */
