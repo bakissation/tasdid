@@ -9,13 +9,20 @@ import {
   type Payment, type PaymentStatus, type StartOrder, type PaymentResult,
   type PaymentStore, type ReturnParams, type SatimLanguage,
   type SqlClient, type PostgresStoreOptions, type RedisLike, type RedisStoreOptions,
-  type PrismaPaymentDelegate, type PrismaPaymentRow, type TransitionRecord, type RefundRecord,
+  type PrismaPaymentDelegate, type PrismaPaymentRow, type TransitionRecord, type TransitionEvent, type RefundRecord,
+  type RefundOptions, type Logger, noopLogger,
   type SweepOptions, type SweepSummary,
 } from '@bakissation/tasdid';
 ```
 
 ## `createCheckout(options): Checkout`
-`CheckoutOptions` — `satim` (a `SatimClient`), `store` (`PaymentStore`), `language?` (default `fr`), `expiresInMinutes?` (default `20` — SATIM's auto-cancel window), `generateId?` (default `crypto.randomUUID`), and event hooks `onPaid?`/`onFailed?`/`onRefunded?`/`onExpired?` (each `(result: PaymentResult) => void | Promise<void>`).
+`CheckoutOptions` — `satim` (a `SatimClient`), `store` (`PaymentStore`), `language?` (default `fr`), `expiresInMinutes?` (default `20` — SATIM's auto-cancel window), `generateId?` (default `crypto.randomUUID`).
+
+**Hooks & observability:**
+- `onPaid?`/`onFailed?`/`onRefunded?`/`onExpired?` — typed convenience events, each `(result: PaymentResult) => void | Promise<void>`.
+- `onTransition?(event: TransitionEvent) => void | Promise<void>` — fires on **every** transition (the superset of the typed events). `TransitionEvent` = `TransitionRecord & { paymentId, orderNumber }`. Use this as the seam for durable, at-least-once delivery (an outbox).
+- `logger?: Logger` — structured diagnostics sink; default no-op. Structural interface (`debug`/`info`/`warn`/`error`, each `(msg, fields?) => void`), so `console`/pino/winston satisfy it with no dependency. Only ever receives ids/statuses — **never a PAN or credentials**.
+- `now?: () => Date` — clock source (default `() => new Date()`). Inject a controllable clock to make the 20-minute expiry deterministic in tests.
 
 ### `Checkout`
 | Method | Returns | Notes |
@@ -31,7 +38,7 @@ import {
 - **`PaymentResult`** — `id`, `orderNumber`, `orderId`, `status`, `amount: Dinar`, `refundedAmount: Dinar`, `redirectUrl`, `paid: boolean`, `expiresAt`, `history: TransitionRecord[]`, `refunds: RefundRecord[]`, `satim: { orderStatus, approvalCode, pan }`.
 - **`PaymentStatus`** — `created | pending | paid | failed | expired | partially_refunded | refunded`.
 - **`Payment`** — the persisted record (money as integer centimes: `amountCentimes`/`refundedCentimes`; plus `expiresAt`, `history`, `refunds`).
-- **`TransitionRecord`** — `{ from, to, at, satimStatus? }` (audit trail). **`RefundRecord`** — `{ idempotencyKey, amountCentimes, at }`.
+- **`TransitionRecord`** — `{ from, to, at, satimStatus? }` (audit trail). **`TransitionEvent`** — `TransitionRecord & { paymentId, orderNumber }` (delivered to `onTransition`). **`RefundRecord`** — `{ idempotencyKey, amountCentimes, at }`.
 - **`ReturnParams`** — `{ orderId?, paymentId? }`.
 
 ## `PaymentStore`

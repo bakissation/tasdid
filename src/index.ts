@@ -3,8 +3,10 @@ export {
   type Checkout,
   type CheckoutOptions,
   type CheckoutEvents,
+  type RefundOptions,
   type StartResult,
 } from './checkout.js';
+export { type Logger, noopLogger } from './logger.js';
 export { createMemoryStore } from './memory-store.js';
 export type { PaymentStore } from './store.js';
 export {
@@ -31,4 +33,7 @@ export type {
   PaymentResult,
   ReturnParams,
   SatimLanguage,
+  TransitionRecord,
+  TransitionEvent,
+  RefundRecord,
 } from './types.js';
