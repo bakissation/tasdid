@@ -84,7 +84,14 @@ function toResult(p: Payment): PaymentResult {
     expiresAt: p.expiresAt,
     history: p.history,
     refunds: p.refunds,
-    satim: { orderStatus: p.satimStatus, approvalCode: p.approvalCode, pan: p.pan },
+    satim: {
+      orderStatus: p.satimStatus,
+      approvalCode: p.approvalCode,
+      pan: p.pan,
+      actionCodeDescription: p.actionCodeDescription,
+      respCode: p.respCode,
+      respCodeDesc: p.respCodeDesc,
+    },
   };
 }
 
@@ -147,6 +154,9 @@ export function createCheckout(options: CheckoutOptions): Checkout {
       satimStatus: null,
       approvalCode: null,
       pan: null,
+      actionCodeDescription: null,
+      respCode: null,
+      respCodeDesc: null,
       idempotencyKey: key,
       history: [],
       refunds: [],
@@ -203,6 +213,11 @@ export function createCheckout(options: CheckoutOptions): Checkout {
     payment.satimStatus = res.orderStatus;
     if (res.approvalCode) payment.approvalCode = res.approvalCode;
     if (res.pan) payment.pan = res.pan;
+    // Capture the gateway result/decline reason — the cert-required failure message.
+    if (res.actionCodeDescription) payment.actionCodeDescription = res.actionCodeDescription;
+    const respParams = (res.params ?? {}) as Record<string, unknown>;
+    if (typeof respParams.respCode === 'string') payment.respCode = respParams.respCode;
+    if (typeof respParams.respCode_desc === 'string') payment.respCodeDesc = respParams.respCode_desc;
 
     if (payment.status === 'pending') {
       // Unregistered order id (errorCode 6) ⇒ gateway auto-cancelled the unconfirmed order ⇒ expired.

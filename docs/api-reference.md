@@ -35,7 +35,7 @@ import {
 
 ## Types
 - **`StartOrder`** — `orderNumber`, `amount: Dinar`, `returnUrl`, `failUrl?`, `description?`, `language?`, `udf1?`, `idempotencyKey?`, `expiresInMinutes?`, `metadata?`.
-- **`PaymentResult`** — `id`, `orderNumber`, `orderId`, `status`, `amount: Dinar`, `refundedAmount: Dinar`, `redirectUrl`, `paid: boolean`, `expiresAt`, `history: TransitionRecord[]`, `refunds: RefundRecord[]`, `satim: { orderStatus, approvalCode, pan }`.
+- **`PaymentResult`** — `id`, `orderNumber`, `orderId`, `status`, `amount: Dinar`, `refundedAmount: Dinar`, `redirectUrl`, `paid: boolean`, `expiresAt`, `history: TransitionRecord[]`, `refunds: RefundRecord[]`, `satim: { orderStatus, approvalCode, pan, actionCodeDescription, respCode, respCodeDesc }`. On a rejected payment, render `respCodeDesc` (fallback `actionCodeDescription`) as the failure reason — SATIM certification requires it on the return page.
 - **`PaymentStatus`** — `created | pending | paid | failed | expired | partially_refunded | refunded`.
 - **`Payment`** — the persisted record (money as integer centimes: `amountCentimes`/`refundedCentimes`; plus `expiresAt`, `history`, `refunds`).
 - **`TransitionRecord`** — `{ from, to, at, satimStatus? }` (audit trail). **`TransitionEvent`** — `TransitionRecord & { paymentId, orderNumber }` (delivered to `onTransition`). **`RefundRecord`** — `{ idempotencyKey, amountCentimes, at }`.
