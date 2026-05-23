@@ -56,6 +56,8 @@ export interface Checkout {
   handleReturn(params: ReturnParams): Promise<PaymentResult>;
   reconcile(paymentId: string): Promise<PaymentResult>;
   refund(paymentId: string, amount?: Dinar, options?: RefundOptions): Promise<PaymentResult>;
+  /** Read a payment's current state without contacting the gateway (no side effects). */
+  get(paymentId: string): Promise<PaymentResult | null>;
 }
 
 function toResult(p: Payment): PaymentResult {
@@ -235,5 +237,10 @@ export function createCheckout(options: CheckoutOptions): Checkout {
     return toResult(payment);
   }
 
-  return { start, handleReturn, reconcile, refund };
+  async function get(paymentId: string): Promise<PaymentResult | null> {
+    const payment = await store.load(paymentId);
+    return payment ? toResult(payment) : null;
+  }
+
+  return { start, handleReturn, reconcile, refund, get };
 }
