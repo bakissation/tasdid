@@ -57,4 +57,5 @@ Reconcile every pending payment (run from a cron/queue). `SweepOptions` — `lim
 
 ## Helpers & errors
 - `isTerminal(status)` · `canTransition(from, to)` · `mapSatimStatus(orderStatus)` (SATIM code → `PaymentStatus`).
+- `failureReason(result.satim)` → the message to render on a rejected payment (`respCodeDesc` → `actionCodeDescription` → `null`). The order SATIM certification requires on the return page.
 - `TasdidError` — `code`: `REGISTER_FAILED | NOT_FOUND | NOT_REFUNDABLE | REFUND_EXCEEDS_DEPOSIT | REFUND_FAILED | INVALID_TRANSITION | INVALID_INPUT`; `satimErrorCode?` when the gateway caused it.

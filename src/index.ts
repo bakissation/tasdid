@@ -26,6 +26,7 @@ export { reconcilePending, type SweepOptions, type SweepSummary, type SweepFailu
 export { TasdidError, type TasdidErrorCode } from './errors.js';
 export { isTerminal, canTransition } from './state.js';
 export { mapSatimStatus } from './status.js';
+export { failureReason } from './reason.js';
 export type {
   Payment,
   PaymentStatus,
