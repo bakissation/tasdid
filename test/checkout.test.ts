@@ -225,6 +225,17 @@ describe('reconcilePending (sweep)', () => {
   });
 });
 
+describe('get', () => {
+  it('reads current state with no gateway call', async () => {
+    const satim = makeSatim();
+    const checkout = createCheckout({ satim, store: createMemoryStore() });
+    const { paymentId } = await checkout.start(order());
+    expect((await checkout.get(paymentId))?.status).toBe('pending');
+    expect(await checkout.get('nope')).toBeNull();
+    expect(satim.getOrderStatus).not.toHaveBeenCalled();
+  });
+});
+
 describe('state machine & helpers', () => {
   it('guards transitions', () => {
     expect(canTransition('pending', 'paid')).toBe(true);
