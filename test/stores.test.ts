@@ -97,7 +97,8 @@ function sample(over: Partial<Payment> = {}): Payment {
   return {
     id: 'p1', orderNumber: 'ORD1', orderId: null, status: 'created', amountCentimes: 500000,
     refundedCentimes: 0, currency: '012', redirectUrl: null, expiresAt: null, satimStatus: null,
-    approvalCode: null, pan: null, idempotencyKey: 'k1', history: [], refunds: [],
+    approvalCode: null, pan: null, actionCodeDescription: null, respCode: null, respCodeDesc: null,
+    idempotencyKey: 'k1', history: [], refunds: [],
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', ...over,
   };
 }
