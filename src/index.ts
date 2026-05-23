@@ -3,8 +3,10 @@ export {
   type Checkout,
   type CheckoutOptions,
   type CheckoutEvents,
+  type RefundOptions,
   type StartResult,
 } from './checkout.js';
+export { type Logger, noopLogger } from './logger.js';
 export { createMemoryStore } from './memory-store.js';
 export type { PaymentStore } from './store.js';
 export {
@@ -20,7 +22,7 @@ export {
   type PrismaPaymentDelegate,
   type PrismaPaymentRow,
 } from './stores/prisma.js';
-export { reconcilePending, type SweepOptions, type SweepSummary } from './sweep.js';
+export { reconcilePending, type SweepOptions, type SweepSummary, type SweepFailure } from './sweep.js';
 export { TasdidError, type TasdidErrorCode } from './errors.js';
 export { isTerminal, canTransition } from './state.js';
 export { mapSatimStatus } from './status.js';
@@ -31,4 +33,7 @@ export type {
   PaymentResult,
   ReturnParams,
   SatimLanguage,
+  TransitionRecord,
+  TransitionEvent,
+  RefundRecord,
 } from './types.js';
