@@ -34,15 +34,18 @@ export function postgresDDL(table = 'tasdid_payments'): string {
   refunds jsonb NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
-  metadata jsonb
+  metadata jsonb,
+  action_code_description text,
+  resp_code text,
+  resp_code_desc text
 );
 CREATE INDEX IF NOT EXISTS ${table}_order_id_idx ON ${table} (order_id);
 CREATE INDEX IF NOT EXISTS ${table}_status_idx ON ${table} (status);`;
 }
 
 const COLS =
-  'id, order_number, order_id, status, amount_centimes, refunded_centimes, currency, redirect_url, expires_at, satim_status, approval_code, pan, idempotency_key, history, refunds, created_at, updated_at, metadata';
-const PLACEHOLDERS = '$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18';
+  'id, order_number, order_id, status, amount_centimes, refunded_centimes, currency, redirect_url, expires_at, satim_status, approval_code, pan, idempotency_key, history, refunds, created_at, updated_at, metadata, action_code_description, resp_code, resp_code_desc';
+const PLACEHOLDERS = '$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21';
 
 function asJson<T>(value: unknown, fallback: T): T {
   if (value == null) return fallback;
@@ -69,6 +72,9 @@ function rowToPayment(row: Record<string, unknown>): Payment {
     satimStatus: row.satim_status == null ? null : Number(row.satim_status),
     approvalCode: (row.approval_code as string | null) ?? null,
     pan: (row.pan as string | null) ?? null,
+    actionCodeDescription: (row.action_code_description as string | null) ?? null,
+    respCode: (row.resp_code as string | null) ?? null,
+    respCodeDesc: (row.resp_code_desc as string | null) ?? null,
     idempotencyKey: String(row.idempotency_key),
     history: asJson<TransitionRecord[]>(row.history, []),
     refunds: asJson<RefundRecord[]>(row.refunds, []),
@@ -84,6 +90,7 @@ function paymentValues(p: Payment): readonly unknown[] {
     p.redirectUrl, p.expiresAt, p.satimStatus, p.approvalCode, p.pan, p.idempotencyKey,
     JSON.stringify(p.history), JSON.stringify(p.refunds), p.createdAt, p.updatedAt,
     p.metadata == null ? null : JSON.stringify(p.metadata),
+    p.actionCodeDescription, p.respCode, p.respCodeDesc,
   ];
 }
 
@@ -115,7 +122,8 @@ export function createPostgresStore(db: SqlClient, options: PostgresStoreOptions
          ON CONFLICT (id) DO UPDATE SET
            order_id = $3, status = $4, amount_centimes = $5, refunded_centimes = $6, currency = $7,
            redirect_url = $8, expires_at = $9, satim_status = $10, approval_code = $11, pan = $12,
-           history = $14, refunds = $15, updated_at = $17, metadata = $18`,
+           history = $14, refunds = $15, updated_at = $17, metadata = $18,
+           action_code_description = $19, resp_code = $20, resp_code_desc = $21`,
         paymentValues(p),
       );
     },

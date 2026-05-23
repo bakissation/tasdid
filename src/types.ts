@@ -60,6 +60,12 @@ export interface Payment {
   satimStatus: number | null;
   approvalCode: string | null;
   pan: string | null;
+  /** SATIM action-code description — a human result/decline reason. */
+  actionCodeDescription: string | null;
+  /** SATIM response code (from the confirm `params`). */
+  respCode: string | null;
+  /** SATIM response-code description — the cert-required failure message. */
+  respCodeDesc: string | null;
   idempotencyKey: string;
   /** Append-only audit trail of state transitions. */
   history: TransitionRecord[];
@@ -109,6 +115,16 @@ export interface PaymentResult {
     orderStatus: number | null;
     approvalCode: string | null;
     pan: string | null;
+    /** SATIM action-code description — a human result/decline reason. */
+    actionCodeDescription: string | null;
+    /** SATIM response code (from the confirm `params`). */
+    respCode: string | null;
+    /**
+     * SATIM response-code description. Render this (falling back to
+     * {@link actionCodeDescription}) as the failure reason on a rejected
+     * payment — it is what SATIM certification requires on the return page.
+     */
+    respCodeDesc: string | null;
   };
 }
 

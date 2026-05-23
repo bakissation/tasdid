@@ -25,6 +25,11 @@ const statusResp = (orderStatus: number | null, errorCode = 0) => ({
   depositAmount: orderStatus === 2 ? 500000 : null,
   pan: orderStatus === 2 ? '6280****7215' : null,
   approvalCode: orderStatus === 2 ? '913180' : null,
+  actionCodeDescription: orderStatus === 2 ? 'Paiement accepté' : 'Votre carte est bloquée',
+  params:
+    orderStatus === 2
+      ? { respCode: '00', respCode_desc: 'Paiement accepté' }
+      : { respCode: '116', respCode_desc: 'Solde insuffisant' },
   isSuccessful: () => errorCode === 0,
   isPaid: () => orderStatus === 2,
 });
@@ -100,6 +105,17 @@ describe('reconcile / handleReturn', () => {
     const r = await checkout.reconcile(paymentId);
     expect(r.status).toBe('failed');
     expect(onFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures the SATIM result reason (respCode_desc → respCodeDesc, actionCodeDescription)', async () => {
+    const satim = makeSatim({ getOrderStatus: vi.fn(async () => statusResp(6)) as never });
+    const checkout = createCheckout({ satim, store: createMemoryStore() });
+    const { paymentId } = await checkout.start(order());
+    const r = await checkout.reconcile(paymentId);
+    expect(r.status).toBe('failed');
+    expect(r.satim.respCode).toBe('116');
+    expect(r.satim.respCodeDesc).toBe('Solde insuffisant');
+    expect(r.satim.actionCodeDescription).toBe('Votre carte est bloquée');
   });
 
   it('pending → expired when the gateway no longer knows the order (errorCode 6)', async () => {

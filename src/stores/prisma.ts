@@ -15,6 +15,9 @@ export interface PrismaPaymentRow {
   satimStatus: number | null;
   approvalCode: string | null;
   pan: string | null;
+  actionCodeDescription: string | null;
+  respCode: string | null;
+  respCodeDesc: string | null;
   idempotencyKey: string;
   history: unknown;
   refunds: unknown;
@@ -54,6 +57,9 @@ export function prismaSchema(model = 'TasdidPayment'): string {
   satimStatus      Int?
   approvalCode     String?
   pan              String?
+  actionCodeDescription String?
+  respCode         String?
+  respCodeDesc     String?
   idempotencyKey   String    @unique
   history          Json      @default("[]")
   refunds          Json      @default("[]")
@@ -85,6 +91,9 @@ function fromRow(row: PrismaPaymentRow): Payment {
     satimStatus: row.satimStatus ?? null,
     approvalCode: row.approvalCode ?? null,
     pan: row.pan ?? null,
+    actionCodeDescription: row.actionCodeDescription ?? null,
+    respCode: row.respCode ?? null,
+    respCodeDesc: row.respCodeDesc ?? null,
     idempotencyKey: row.idempotencyKey,
     history: (row.history as TransitionRecord[] | null) ?? [],
     refunds: (row.refunds as RefundRecord[] | null) ?? [],
@@ -108,6 +117,9 @@ function toRow(p: Payment): PrismaPaymentRow {
     satimStatus: p.satimStatus,
     approvalCode: p.approvalCode,
     pan: p.pan,
+    actionCodeDescription: p.actionCodeDescription,
+    respCode: p.respCode,
+    respCodeDesc: p.respCodeDesc,
     idempotencyKey: p.idempotencyKey,
     history: p.history,
     refunds: p.refunds,
