@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { Dinar } from '@bakissation/dinar';
 import type { SatimClient } from '@bakissation/satim';
 import { TasdidError } from './errors.js';
-import { assertTransition } from './state.js';
+import { type Logger, noopLogger } from './logger.js';
+import { assertTransition, isTerminal } from './state.js';
 import { mapSatimStatus } from './status.js';
 import type { PaymentStore } from './store.js';
 import type {
@@ -12,6 +13,7 @@ import type {
   ReturnParams,
   SatimLanguage,
   StartOrder,
+  TransitionEvent,
   TransitionRecord,
 } from './types.js';
 
@@ -37,6 +39,15 @@ export interface CheckoutOptions extends CheckoutEvents {
   expiresInMinutes?: number;
   /** Override the payment-id generator (default `crypto.randomUUID`). */
   generateId?: () => string;
+  /**
+   * Fires on **every** state transition (the superset of the typed `onPaid`/…
+   * events) — the seam for durable, at-least-once event delivery (an outbox).
+   */
+  onTransition?(event: TransitionEvent): void | Promise<void>;
+  /** Structured diagnostics sink (default: no-op). Only ever receives ids/statuses, never a PAN. */
+  logger?: Logger;
+  /** Clock source (default `() => new Date()`). Inject to make expiry deterministic in tests. */
+  now?: () => Date;
 }
 
 export interface StartResult {
@@ -85,6 +96,9 @@ export function createCheckout(options: CheckoutOptions): Checkout {
     language = 'fr',
     expiresInMinutes = DEFAULT_EXPIRY_MINUTES,
     generateId = randomUUID,
+    logger = noopLogger,
+    onTransition,
+    now = () => new Date(),
   } = options;
 
   async function fireEvent(prev: PaymentStatus, next: PaymentStatus, result: PaymentResult): Promise<void> {
@@ -98,19 +112,28 @@ export function createCheckout(options: CheckoutOptions): Checkout {
   async function transition(p: Payment, next: PaymentStatus, satimStatus?: number | null): Promise<void> {
     assertTransition(p.status, next);
     const prev = p.status;
-    const record: TransitionRecord = { from: prev, to: next, at: new Date().toISOString() };
+    const record: TransitionRecord = { from: prev, to: next, at: now().toISOString() };
     if (satimStatus !== undefined) record.satimStatus = satimStatus;
     p.history.push(record);
     p.status = next;
     p.updatedAt = record.at;
     await store.save(p);
+    logger.info('payment transition', {
+      paymentId: p.id,
+      orderNumber: p.orderNumber,
+      orderId: p.orderId,
+      from: prev,
+      to: next,
+      satimStatus: record.satimStatus ?? null,
+    });
+    await onTransition?.({ ...record, paymentId: p.id, orderNumber: p.orderNumber });
     await fireEvent(prev, next, toResult(p));
   }
 
   async function start(order: StartOrder): Promise<StartResult> {
     if (!order.orderNumber) throw new TasdidError('orderNumber is required', 'INVALID_INPUT');
     const key = order.idempotencyKey ?? order.orderNumber;
-    const now = new Date().toISOString();
+    const nowIso = now().toISOString();
     const init: Payment = {
       id: generateId(),
       orderNumber: order.orderNumber,
@@ -127,17 +150,19 @@ export function createCheckout(options: CheckoutOptions): Checkout {
       idempotencyKey: key,
       history: [],
       refunds: [],
-      createdAt: now,
-      updatedAt: now,
+      createdAt: nowIso,
+      updatedAt: nowIso,
       metadata: order.metadata,
     };
     const { payment, created } = await store.claim(key, init);
 
     // Idempotent: a prior start already registered this order → never double-register.
     if (!created && payment.orderId && payment.redirectUrl) {
+      logger.debug('start: idempotent hit', { paymentId: payment.id, orderNumber: payment.orderNumber });
       return { paymentId: payment.id, redirectUrl: payment.redirectUrl, result: toResult(payment) };
     }
 
+    logger.debug('start: registering order', { paymentId: payment.id, orderNumber: payment.orderNumber });
     const res = await satim.register({
       orderNumber: payment.orderNumber,
       amount: order.amount,
@@ -149,6 +174,7 @@ export function createCheckout(options: CheckoutOptions): Checkout {
     });
 
     if (!res.isSuccessful() || !res.orderId || !res.formUrl) {
+      logger.warn('start: SATIM register failed', { paymentId: payment.id, satimErrorCode: res.errorCode });
       await transition(payment, 'failed');
       throw new TasdidError(`SATIM register failed (errorCode ${res.errorCode})`, 'REGISTER_FAILED', res.errorCode);
     }
@@ -156,41 +182,73 @@ export function createCheckout(options: CheckoutOptions): Checkout {
     const minutes = order.expiresInMinutes ?? expiresInMinutes;
     payment.orderId = res.orderId;
     payment.redirectUrl = res.formUrl;
-    payment.expiresAt = new Date(Date.now() + minutes * 60_000).toISOString();
+    payment.expiresAt = new Date(now().getTime() + minutes * 60_000).toISOString();
     await transition(payment, 'pending');
     return { paymentId: payment.id, redirectUrl: res.formUrl, result: toResult(payment) };
   }
 
   function isExpired(p: Payment): boolean {
-    return p.expiresAt !== null && Date.now() > Date.parse(p.expiresAt);
+    return p.expiresAt !== null && now().getTime() > Date.parse(p.expiresAt);
   }
 
   async function reconcile(paymentId: string): Promise<PaymentResult> {
     const payment = await store.load(paymentId);
     if (!payment) throw new TasdidError(`Payment not found: ${paymentId}`, 'NOT_FOUND');
-    if (payment.status !== 'pending' || !payment.orderId) return toResult(payment);
+    // Terminal states never change again; nothing to query without a gateway order.
+    if (isTerminal(payment.status) || !payment.orderId) return toResult(payment);
 
+    logger.debug('reconcile: querying gateway', { paymentId: payment.id, orderId: payment.orderId });
     const res = await satim.getOrderStatus(payment.orderId, language);
-
-    // Unregistered order id (errorCode 6) ⇒ gateway auto-cancelled the unconfirmed order ⇒ expired.
-    if (res.errorCode === 6) {
-      await transition(payment, 'expired', res.orderStatus);
-      return toResult(payment);
-    }
 
     payment.satimStatus = res.orderStatus;
     if (res.approvalCode) payment.approvalCode = res.approvalCode;
     if (res.pan) payment.pan = res.pan;
 
-    const next = mapSatimStatus(res.orderStatus);
-    if (next === 'paid' || next === 'failed') {
-      await transition(payment, next, res.orderStatus);
-    } else if (isExpired(payment)) {
-      // still not paid and the 20-minute window has passed ⇒ SATIM has cancelled it.
-      await transition(payment, 'expired', res.orderStatus);
+    if (payment.status === 'pending') {
+      // Unregistered order id (errorCode 6) ⇒ gateway auto-cancelled the unconfirmed order ⇒ expired.
+      if (res.errorCode === 6) {
+        await transition(payment, 'expired', res.orderStatus);
+        return toResult(payment);
+      }
+      const next = mapSatimStatus(res.orderStatus);
+      if (next === 'paid') {
+        const gatewayCentimes = res.depositAmount ?? res.amount;
+        if (gatewayCentimes != null && gatewayCentimes !== payment.amountCentimes) {
+          logger.warn('reconcile: gateway amount differs from recorded amount', {
+            paymentId: payment.id,
+            orderId: payment.orderId,
+            recordedCentimes: payment.amountCentimes,
+            gatewayCentimes,
+          });
+        }
+        await transition(payment, 'paid', res.orderStatus);
+      } else if (next === 'failed') {
+        await transition(payment, 'failed', res.orderStatus);
+      } else if (isExpired(payment)) {
+        // still not paid and the 20-minute window has passed ⇒ SATIM has cancelled it.
+        await transition(payment, 'expired', res.orderStatus);
+      } else {
+        payment.updatedAt = now().toISOString();
+        await store.save(payment);
+      }
     } else {
-      payment.updatedAt = new Date().toISOString();
-      await store.save(payment);
+      // paid | partially_refunded: converge ONLY on a full refund the gateway reports but
+      // tasdid hasn't recorded (an out-of-band refund, or a crash after the gateway refund
+      // succeeded). Never downgrade a paid payment on any other status.
+      if (res.isSuccessful() && res.orderStatus === 4 && payment.refundedCentimes < payment.amountCentimes) {
+        const remaining = payment.amountCentimes - payment.refundedCentimes;
+        payment.refundedCentimes = payment.amountCentimes;
+        payment.refunds.push({ idempotencyKey: null, amountCentimes: remaining, at: now().toISOString() });
+        logger.warn('reconcile: gateway reports a refund not recorded locally — converging to refunded', {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          amountCentimes: remaining,
+        });
+        await transition(payment, 'refunded', res.orderStatus);
+      } else {
+        payment.updatedAt = now().toISOString();
+        await store.save(payment);
+      }
     }
     return toResult(payment);
   }
@@ -211,6 +269,7 @@ export function createCheckout(options: CheckoutOptions): Checkout {
     // Idempotent: a refund already applied under this key is a no-op.
     const key = refundOptions.idempotencyKey;
     if (key !== undefined && payment.refunds.some((r) => r.idempotencyKey === key)) {
+      logger.debug('refund: idempotent no-op', { paymentId: payment.id, idempotencyKey: key });
       return toResult(payment);
     }
 
@@ -225,13 +284,15 @@ export function createCheckout(options: CheckoutOptions): Checkout {
       throw new TasdidError('Refund amount exceeds the refundable balance', 'REFUND_EXCEEDS_DEPOSIT');
     }
 
+    logger.debug('refund: requesting', { paymentId: payment.id, orderId: payment.orderId, amountCentimes });
     const res = await satim.refund(payment.orderId, Dinar.fromCentimes(amountCentimes), language);
     if (!res.isSuccessful()) {
+      logger.warn('refund: SATIM refund failed', { paymentId: payment.id, satimErrorCode: res.errorCode });
       throw new TasdidError(`SATIM refund failed (errorCode ${res.errorCode})`, 'REFUND_FAILED', res.errorCode);
     }
 
     payment.refundedCentimes += amountCentimes;
-    payment.refunds.push({ idempotencyKey: key ?? null, amountCentimes, at: new Date().toISOString() });
+    payment.refunds.push({ idempotencyKey: key ?? null, amountCentimes, at: now().toISOString() });
     const fullyRefunded = payment.refundedCentimes >= payment.amountCentimes;
     await transition(payment, fullyRefunded ? 'refunded' : 'partially_refunded');
     return toResult(payment);

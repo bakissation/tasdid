@@ -9,20 +9,27 @@ import {
   type Payment, type PaymentStatus, type StartOrder, type PaymentResult,
   type PaymentStore, type ReturnParams, type SatimLanguage,
   type SqlClient, type PostgresStoreOptions, type RedisLike, type RedisStoreOptions,
-  type PrismaPaymentDelegate, type PrismaPaymentRow, type TransitionRecord, type RefundRecord,
+  type PrismaPaymentDelegate, type PrismaPaymentRow, type TransitionRecord, type TransitionEvent, type RefundRecord,
+  type RefundOptions, type Logger, noopLogger,
   type SweepOptions, type SweepSummary,
 } from '@bakissation/tasdid';
 ```
 
 ## `createCheckout(options): Checkout`
-`CheckoutOptions` — `satim` (a `SatimClient`), `store` (`PaymentStore`), `language?` (default `fr`), `expiresInMinutes?` (default `20` — SATIM's auto-cancel window), `generateId?` (default `crypto.randomUUID`), and event hooks `onPaid?`/`onFailed?`/`onRefunded?`/`onExpired?` (each `(result: PaymentResult) => void | Promise<void>`).
+`CheckoutOptions` — `satim` (a `SatimClient`), `store` (`PaymentStore`), `language?` (default `fr`), `expiresInMinutes?` (default `20` — SATIM's auto-cancel window), `generateId?` (default `crypto.randomUUID`).
+
+**Hooks & observability:**
+- `onPaid?`/`onFailed?`/`onRefunded?`/`onExpired?` — typed convenience events, each `(result: PaymentResult) => void | Promise<void>`.
+- `onTransition?(event: TransitionEvent) => void | Promise<void>` — fires on **every** transition (the superset of the typed events). `TransitionEvent` = `TransitionRecord & { paymentId, orderNumber }`. Use this as the seam for durable, at-least-once delivery (an outbox).
+- `logger?: Logger` — structured diagnostics sink; default no-op. Structural interface (`debug`/`info`/`warn`/`error`, each `(msg, fields?) => void`), so `console`/pino/winston satisfy it with no dependency. Only ever receives ids/statuses — **never a PAN or credentials**.
+- `now?: () => Date` — clock source (default `() => new Date()`). Inject a controllable clock to make the 20-minute expiry deterministic in tests.
 
 ### `Checkout`
 | Method | Returns | Notes |
 |---|---|---|
 | `start(order: StartOrder)` | `Promise<StartResult>` | idempotent register; `{ paymentId, redirectUrl, result }` |
 | `handleReturn(params: ReturnParams)` | `Promise<PaymentResult>` | match by `orderId`/`paymentId` → reconcile |
-| `reconcile(paymentId)` | `Promise<PaymentResult>` | poll `getOrderStatus`, converge, fire events; no-op once terminal |
+| `reconcile(paymentId)` | `Promise<PaymentResult>` | poll `getOrderStatus`, converge, fire events; short-circuits only once **terminal** (`failed`/`expired`/`refunded`). Re-queries `paid`/`partially_refunded` and converges to `refunded` if the gateway reports a full refund tasdid hasn't recorded (out-of-band refund / crash-after-success); logs a warning if the gateway's amount differs from the recorded amount |
 | `refund(paymentId, amount?, opts?: { idempotencyKey? })` | `Promise<PaymentResult>` | full/partial (≤ deposited); reusing an `idempotencyKey` is a no-op |
 | `get(paymentId)` | `Promise<PaymentResult \| null>` | read current state, no gateway call (no side effects) |
 
@@ -31,7 +38,7 @@ import {
 - **`PaymentResult`** — `id`, `orderNumber`, `orderId`, `status`, `amount: Dinar`, `refundedAmount: Dinar`, `redirectUrl`, `paid: boolean`, `expiresAt`, `history: TransitionRecord[]`, `refunds: RefundRecord[]`, `satim: { orderStatus, approvalCode, pan }`.
 - **`PaymentStatus`** — `created | pending | paid | failed | expired | partially_refunded | refunded`.
 - **`Payment`** — the persisted record (money as integer centimes: `amountCentimes`/`refundedCentimes`; plus `expiresAt`, `history`, `refunds`).
-- **`TransitionRecord`** — `{ from, to, at, satimStatus? }` (audit trail). **`RefundRecord`** — `{ idempotencyKey, amountCentimes, at }`.
+- **`TransitionRecord`** — `{ from, to, at, satimStatus? }` (audit trail). **`TransitionEvent`** — `TransitionRecord & { paymentId, orderNumber }` (delivered to `onTransition`). **`RefundRecord`** — `{ idempotencyKey, amountCentimes, at }`.
 - **`ReturnParams`** — `{ orderId?, paymentId? }`.
 
 ## `PaymentStore`
@@ -46,7 +53,7 @@ The persistence contract: `claim(key, init)` (atomic get-or-create), `load(id)`,
 `SqlClient`, `RedisLike`, and `PrismaPaymentDelegate` are exported structural types — implement them to wrap any driver.
 
 ## `reconcilePending(checkout, store, opts?): Promise<SweepSummary>`
-Reconcile every pending payment (run from a cron/queue). `SweepOptions` — `limit?`, `onError?(paymentId, error)`. `SweepSummary` — `{ reconciled, errors, results }`.
+Reconcile every pending payment (run from a cron/queue). `SweepOptions` — `limit?`, `onError?(paymentId, error)`. `SweepSummary` — `{ reconciled, errors, results, paid, failed, expired, refunded, stillPending, failures }`, where `failures: SweepFailure[]` (`{ paymentId, error }`) is the ops-alarm list and the per-status counts summarize the run. Alert on `failures`; watch `stillPending`.
 
 ## Helpers & errors
 - `isTerminal(status)` · `canTransition(from, to)` · `mapSatimStatus(orderStatus)` (SATIM code → `PaymentStatus`).
