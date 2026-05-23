@@ -3,7 +3,7 @@ import { Dinar } from '@bakissation/dinar';
 import type { SatimClient } from '@bakissation/satim';
 import { TasdidError } from './errors.js';
 import { type Logger, noopLogger } from './logger.js';
-import { assertTransition } from './state.js';
+import { assertTransition, isTerminal } from './state.js';
 import { mapSatimStatus } from './status.js';
 import type { PaymentStore } from './store.js';
 import type {
@@ -194,30 +194,61 @@ export function createCheckout(options: CheckoutOptions): Checkout {
   async function reconcile(paymentId: string): Promise<PaymentResult> {
     const payment = await store.load(paymentId);
     if (!payment) throw new TasdidError(`Payment not found: ${paymentId}`, 'NOT_FOUND');
-    if (payment.status !== 'pending' || !payment.orderId) return toResult(payment);
+    // Terminal states never change again; nothing to query without a gateway order.
+    if (isTerminal(payment.status) || !payment.orderId) return toResult(payment);
 
     logger.debug('reconcile: querying gateway', { paymentId: payment.id, orderId: payment.orderId });
     const res = await satim.getOrderStatus(payment.orderId, language);
-
-    // Unregistered order id (errorCode 6) ⇒ gateway auto-cancelled the unconfirmed order ⇒ expired.
-    if (res.errorCode === 6) {
-      await transition(payment, 'expired', res.orderStatus);
-      return toResult(payment);
-    }
 
     payment.satimStatus = res.orderStatus;
     if (res.approvalCode) payment.approvalCode = res.approvalCode;
     if (res.pan) payment.pan = res.pan;
 
-    const next = mapSatimStatus(res.orderStatus);
-    if (next === 'paid' || next === 'failed') {
-      await transition(payment, next, res.orderStatus);
-    } else if (isExpired(payment)) {
-      // still not paid and the 20-minute window has passed ⇒ SATIM has cancelled it.
-      await transition(payment, 'expired', res.orderStatus);
+    if (payment.status === 'pending') {
+      // Unregistered order id (errorCode 6) ⇒ gateway auto-cancelled the unconfirmed order ⇒ expired.
+      if (res.errorCode === 6) {
+        await transition(payment, 'expired', res.orderStatus);
+        return toResult(payment);
+      }
+      const next = mapSatimStatus(res.orderStatus);
+      if (next === 'paid') {
+        const gatewayCentimes = res.depositAmount ?? res.amount;
+        if (gatewayCentimes != null && gatewayCentimes !== payment.amountCentimes) {
+          logger.warn('reconcile: gateway amount differs from recorded amount', {
+            paymentId: payment.id,
+            orderId: payment.orderId,
+            recordedCentimes: payment.amountCentimes,
+            gatewayCentimes,
+          });
+        }
+        await transition(payment, 'paid', res.orderStatus);
+      } else if (next === 'failed') {
+        await transition(payment, 'failed', res.orderStatus);
+      } else if (isExpired(payment)) {
+        // still not paid and the 20-minute window has passed ⇒ SATIM has cancelled it.
+        await transition(payment, 'expired', res.orderStatus);
+      } else {
+        payment.updatedAt = now().toISOString();
+        await store.save(payment);
+      }
     } else {
-      payment.updatedAt = now().toISOString();
-      await store.save(payment);
+      // paid | partially_refunded: converge ONLY on a full refund the gateway reports but
+      // tasdid hasn't recorded (an out-of-band refund, or a crash after the gateway refund
+      // succeeded). Never downgrade a paid payment on any other status.
+      if (res.isSuccessful() && res.orderStatus === 4 && payment.refundedCentimes < payment.amountCentimes) {
+        const remaining = payment.amountCentimes - payment.refundedCentimes;
+        payment.refundedCentimes = payment.amountCentimes;
+        payment.refunds.push({ idempotencyKey: null, amountCentimes: remaining, at: now().toISOString() });
+        logger.warn('reconcile: gateway reports a refund not recorded locally — converging to refunded', {
+          paymentId: payment.id,
+          orderId: payment.orderId,
+          amountCentimes: remaining,
+        });
+        await transition(payment, 'refunded', res.orderStatus);
+      } else {
+        payment.updatedAt = now().toISOString();
+        await store.save(payment);
+      }
     }
     return toResult(payment);
   }

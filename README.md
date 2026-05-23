@@ -101,6 +101,8 @@ Or implement `PaymentStore` yourself — just make `claim` atomic (`INSERT … O
 - **Expiry** — SATIM auto-cancels an unconfirmed order after **20 minutes**; tasdid mirrors that (`expiresInMinutes`, default 20) so abandoned payments reach `expired` on a clock, not just on a gateway error.
 - **Refund idempotency** — `refund(id, amount?, { idempotencyKey })`; retrying with the same key is a no-op (no double-refund).
 - **Audit history** — every payment carries a `history` of state transitions (and `refunds`), for disputes/debugging.
+- **Refund reconciliation** — `reconcile` re-checks `paid` payments and converges to `refunded` if the gateway reports a refund tasdid never recorded (a refund done directly at SATIM, or a crash after the gateway refund succeeded). It never downgrades a paid payment otherwise, and warns if the gateway's amount disagrees with the recorded one.
+- **Sweep report** — `reconcilePending` returns a classified `SweepSummary` (`paid`/`failed`/`expired`/`refunded`/`stillPending` counts + a `failures` list) so a cron can alert on what didn't settle — the only real window into health when the gateway has no webhooks.
 
 ## Observability
 

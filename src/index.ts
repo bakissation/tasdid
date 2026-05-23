@@ -22,7 +22,7 @@ export {
   type PrismaPaymentDelegate,
   type PrismaPaymentRow,
 } from './stores/prisma.js';
-export { reconcilePending, type SweepOptions, type SweepSummary } from './sweep.js';
+export { reconcilePending, type SweepOptions, type SweepSummary, type SweepFailure } from './sweep.js';
 export { TasdidError, type TasdidErrorCode } from './errors.js';
 export { isTerminal, canTransition } from './state.js';
 export { mapSatimStatus } from './status.js';

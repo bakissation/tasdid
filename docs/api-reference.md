@@ -29,7 +29,7 @@ import {
 |---|---|---|
 | `start(order: StartOrder)` | `Promise<StartResult>` | idempotent register; `{ paymentId, redirectUrl, result }` |
 | `handleReturn(params: ReturnParams)` | `Promise<PaymentResult>` | match by `orderId`/`paymentId` → reconcile |
-| `reconcile(paymentId)` | `Promise<PaymentResult>` | poll `getOrderStatus`, converge, fire events; no-op once terminal |
+| `reconcile(paymentId)` | `Promise<PaymentResult>` | poll `getOrderStatus`, converge, fire events; short-circuits only once **terminal** (`failed`/`expired`/`refunded`). Re-queries `paid`/`partially_refunded` and converges to `refunded` if the gateway reports a full refund tasdid hasn't recorded (out-of-band refund / crash-after-success); logs a warning if the gateway's amount differs from the recorded amount |
 | `refund(paymentId, amount?, opts?: { idempotencyKey? })` | `Promise<PaymentResult>` | full/partial (≤ deposited); reusing an `idempotencyKey` is a no-op |
 | `get(paymentId)` | `Promise<PaymentResult \| null>` | read current state, no gateway call (no side effects) |
 
@@ -53,7 +53,7 @@ The persistence contract: `claim(key, init)` (atomic get-or-create), `load(id)`,
 `SqlClient`, `RedisLike`, and `PrismaPaymentDelegate` are exported structural types — implement them to wrap any driver.
 
 ## `reconcilePending(checkout, store, opts?): Promise<SweepSummary>`
-Reconcile every pending payment (run from a cron/queue). `SweepOptions` — `limit?`, `onError?(paymentId, error)`. `SweepSummary` — `{ reconciled, errors, results }`.
+Reconcile every pending payment (run from a cron/queue). `SweepOptions` — `limit?`, `onError?(paymentId, error)`. `SweepSummary` — `{ reconciled, errors, results, paid, failed, expired, refunded, stillPending, failures }`, where `failures: SweepFailure[]` (`{ paymentId, error }`) is the ops-alarm list and the per-status counts summarize the run. Alert on `failures`; watch `stillPending`.
 
 ## Helpers & errors
 - `isTerminal(status)` · `canTransition(from, to)` · `mapSatimStatus(orderStatus)` (SATIM code → `PaymentStatus`).
