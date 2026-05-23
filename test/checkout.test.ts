@@ -10,6 +10,7 @@ import {
   isTerminal,
   mapSatimStatus,
   failureReason,
+  generateOrderNumber,
 } from '../src/index.js';
 
 const da = (n: number): Dinar => Dinar.fromDinars(n);
@@ -329,6 +330,11 @@ describe('state machine & helpers', () => {
     expect(mapSatimStatus(6)).toBe('failed');
     expect(mapSatimStatus(0)).toBe('pending');
     expect(mapSatimStatus(4)).toBe('refunded');
+  });
+  it('generateOrderNumber: 10 uppercase hex chars, unique', () => {
+    expect(generateOrderNumber()).toMatch(/^[0-9A-F]{10}$/);
+    const set = new Set(Array.from({ length: 500 }, () => generateOrderNumber()));
+    expect(set.size).toBe(500);
   });
   it('failureReason: respCodeDesc → actionCodeDescription → null', () => {
     const base = { orderStatus: 6, approvalCode: null, pan: null };
