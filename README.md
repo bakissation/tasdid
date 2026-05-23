@@ -108,3 +108,7 @@ Keeps you in SAQ-A *by construction* (redirect-only, never touches card data), b
 ## License
 
 MIT © Abdelbaki Berkati
+
+## Credits
+
+Built and maintained by **Abdelbaki Berkati** — [berkati.xyz](https://berkati.xyz) · [@bakissation](https://github.com/bakissation).
